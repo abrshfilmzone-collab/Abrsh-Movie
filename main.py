@@ -3,7 +3,8 @@ from telebot import types
 import sqlite3
 
 # --- 1. CONFIGURATION ---
-TOKEN = "8673546825:AAHMHdVQ-AKH-dQRVBLQnpvZruU5tovQDP8"
+# አዲሱ ቶከን እዚህ ጋር ተተክቷል
+TOKEN = "8673546825:AAG3tqrnD_STYgf5gtyjVdbw8awXUQD1m10"
 ADMIN_ID = 7908276494 
 PHOTO_URL = "https://i.ibb.co/PsQG4KDY/IMG-20260329-190151-356.jpg"
 bot = telebot.TeleBot(TOKEN)
@@ -20,6 +21,7 @@ def init_db():
     return conn
 
 conn = init_db()
+temp_name = {} # ለጊዜው ስም መያዣ
 
 # --- 3. KEYBOARDS ---
 def main_markup(user_id):
@@ -27,7 +29,6 @@ def main_markup(user_id):
     markup.row("⨳ ፊልም ልይ!", "⨳ ያለኝ ሂሳብ!")
     markup.row("⨳ ገቢ ላድርግ!", "⨳ ጎደኛዬን ልጋብዝ!")
     markup.row("⨳ አጠቃቀም!", "⨳ DM ABRSH")
-    # አድሚን ከሆንክ ብቻ የሚታይ በተን
     if user_id == ADMIN_ID:
         markup.row("📂 Upload Movies")
     return markup
@@ -38,7 +39,7 @@ def start(message):
     user_id = message.from_user.id
     args = message.text.split()
     referrer = int(args[1]) if len(args) > 1 else None
-
+    
     c = conn.cursor()
     c.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     if not c.fetchone():
@@ -47,47 +48,47 @@ def start(message):
         if referrer:
             c.execute("UPDATE users SET balance = balance + 1.0 WHERE user_id=?", (referrer,))
             conn.commit()
-            bot.send_message(referrer, "🎉 እንኳን ደስ አለዎት! በአንድ ሰው ግبዣ 1.0 ብር ተጨምሯል።")
+            bot.send_message(referrer, "🎉 እንኳን ደስ አለዎት! በአንድ ሰው ግብዣ 1.0 ብር ተጨምሯል።")
 
     welcome_text = "⨳ ሰላም ይሄ የABRSH Movies Bot ነው እንኳን በደህና መጡ!"
     bot.send_photo(message.chat.id, PHOTO_URL, caption=welcome_text, reply_markup=main_markup(user_id))
 
-# --- 📂 ADMIN: UPLOAD MOVIES ---
+# --- 📂 ADMIN: UPLOAD MOVIES (FILE ONLY) ---
 @bot.message_handler(func=lambda m: m.text == "📂 Upload Movies" and m.from_user.id == ADMIN_ID)
 def ask_for_file(message):
-    msg = bot.send_message(message.chat.id, "📤 Send Me File Sir (ቪዲዮውን ይላኩ)")
-    bot.register_next_step_handler(msg, get_video_file)
+    msg = bot.send_message(message.chat.id, "📤 Send Me File Sir (ፋይሉን ብቻ ይላኩ)")
+    bot.register_next_step_handler(msg, get_document_file)
 
-def get_video_file(message):
-    if message.content_type == 'video':
-        file_id = message.video.file_id
-        file_name = message.caption if message.caption else "ያልተሰየመ ፊልም"
+def get_document_file(message):
+    if message.content_type == 'document':
+        file_id = message.document.file_id
+        file_name = message.caption if message.caption else message.document.file_name
+        temp_name[ADMIN_ID] = file_name
         
         markup = types.InlineKeyboardMarkup()
-        # የዋጋ ተመኖች (እንደ "አጠቃቀም" ገፅህ የተሰራ)
-        markup.add(types.InlineKeyboardButton("⚫️ ሲንግል (0.5 ብር)", callback_data=f"set_0.5_{file_id}_{file_name}"))
-        markup.add(types.InlineKeyboardButton("🟡 ተከታታይ (0.3 ብር)", callback_data=f"set_0.3_{file_id}_{file_name}"))
-        markup.add(types.InlineKeyboardButton("🔴 ኢሮቲክ (1.0 ብር)", callback_data=f"set_1.0_{file_id}_{file_name}"))
-        markup.add(types.InlineKeyboardButton("⚪️ መፅሀፍ (5.0 ብር)", callback_data=f"set_5.0_{file_id}_{file_name}"))
+        markup.add(types.InlineKeyboardButton("⚫️ ትርጉም ሲንግል (0.5 ብር)", callback_data=f"set_0.5_{file_id}"))
+        markup.add(types.InlineKeyboardButton("🟡 ትርጉም ተከታታይ (0.3 ብር)", callback_data=f"set_0.3_{file_id}"))
+        markup.add(types.InlineKeyboardButton("🔵 አማርኛ (0.5 ብር)", callback_data=f"set_0.5_{file_id}"))
+        markup.add(types.InlineKeyboardButton("🔴 ኢሮቲክ (1.0 ብር)", callback_data=f"set_1.0_{file_id}"))
+        markup.add(types.InlineKeyboardButton("⚪️ መፅሀፍ (5.0 ብር)", callback_data=f"set_5.0_{file_id}"))
         
-        bot.send_message(ADMIN_ID, f"🎬 ፊልም: {file_name}\n\nእባክዎ የፊልሙን አይነት ይምረጡ፦", reply_markup=markup)
+        bot.send_message(ADMIN_ID, f"🎬 ፋይል: {file_name}\n\nየፋይሉን አይነት ይምረጡ፦", reply_markup=markup)
     else:
-        bot.send_message(ADMIN_ID, "❌ እባክዎ ቪዲዮ ፋይል ብቻ ይላኩ!")
+        bot.send_message(ADMIN_ID, "❌ እባክዎ ፋይል (Document) ብቻ ይላኩ!")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("set_"))
 def save_movie(call):
     data = call.data.split("_")
     price = float(data[1])
     file_id = data[2]
-    name = data[3]
+    name = temp_name.get(ADMIN_ID, "ያልተሰየመ ፋይል")
     
     c = conn.cursor()
     c.execute("INSERT INTO movies (name, file_id, price) VALUES (?, ?, ?)", (name, file_id, price))
     conn.commit()
-    
-    bot.edit_message_text(f"✅ ተሳክቷል!\n🎬 ፊልም: {name}\n💰 ዋጋ: {price} ብር\n\nዳታቤዝ ላይ ተመዝግቧል።", call.message.chat.id, call.message.message_id)
+    bot.edit_message_text(f"✅ ተሳክቷል!\n🎬 ስም: {name}\n💰 ዋጋ: {price} ብር ተመዝግቧል።", call.message.chat.id, call.message.message_id)
 
-# --- 🎬 ፊልም ልይ! (SEARCH) ---
+# --- 🎬 ፊልም ልይ! ---
 @bot.message_handler(func=lambda m: m.text == "⨳ ፊልም ልይ!")
 def search_start(message):
     msg = bot.send_message(message.chat.id, "⨳ የሚፈልጉትን ፊልም ስም ይፃፉ!")
@@ -96,17 +97,17 @@ def search_start(message):
 def process_search(message):
     query = message.text
     c = conn.cursor()
-    c.execute("SELECT name, file_id, price FROM movies WHERE name LIKE ?", ('%' + query + '%',))
+    c.execute("SELECT name, price FROM movies WHERE name LIKE ?", ('%' + query + '%',))
     results = c.fetchall()
     if results:
         markup = types.InlineKeyboardMarkup()
         for movie in results:
-            markup.add(types.InlineKeyboardButton(text=f"🎬 {movie[0]} ({movie[2]} ብር)", callback_data=f"buy_{movie[0]}"))
-        bot.send_message(message.chat.id, f"ለ '{query}' የተገኙ ውጤቶች፦", reply_markup=markup)
+            markup.add(types.InlineKeyboardButton(text=f"📂 {movie[0]} ({movie[1]} ብር)", callback_data=f"buy_{movie[0]}"))
+        bot.send_message(message.chat.id, f"ውጤቶች፦", reply_markup=markup)
     else:
-        bot.send_message(message.chat.id, "⨳ በዚ ስም የተሰየመ ፊልም ማግኘት አልቻልኩም!")
+        bot.send_message(message.chat.id, "⨳ ፋይሉ አልተገኘም!")
 
-# --- 📸 SCREENSHOT & DEPOSIT --- (ከላይ የነበረው ኮድ ይቀጥላል...)
+# --- 📸 SCREENSHOT & DEPOSIT ---
 @bot.message_handler(content_types=['photo'])
 def handle_screenshot(message):
     if message.chat.id != ADMIN_ID:
@@ -117,15 +118,6 @@ def handle_screenshot(message):
         bot.forward_message(ADMIN_ID, message.chat.id, message.message_id)
         bot.send_message(ADMIN_ID, f"👤 ተጠቃሚ ID: {message.chat.id}\nክፍያውን ያጽድቁ፦", reply_markup=markup)
 
-# (ሌሎች የቆዩ የኮድ ክፍሎች እዚህ ጋር ይቀጥላሉ...)
-@bot.message_handler(func=lambda m: m.text == "⨳ ያለኝ ሂሳብ!")
-def check_balance(message):
-    c = conn.cursor()
-    c.execute("SELECT balance FROM users WHERE user_id=?", (message.from_user.id,))
-    res = c.fetchone()
-    balance = res[0] if res else 10.0
-    bot.send_message(message.chat.id, f"⨳ ቀሪ ሂሳብ ~> {balance} ብር።")
-
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ask_amount_"))
 def ask_amount(call):
     user_id = call.data.split("_")[2]
@@ -133,12 +125,15 @@ def ask_amount(call):
     bot.register_next_step_handler(msg, process_deposit, user_id)
 
 def process_deposit(message, user_id):
-    amount = float(message.text)
-    c = conn.cursor()
-    c.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
-    conn.commit()
-    bot.send_message(user_id, f"🎉 {amount} ብር ገቢ ተደርጓል።")
-    bot.send_message(ADMIN_ID, "✅ ተፈፅሟል።")
+    try:
+        amount = float(message.text)
+        c = conn.cursor()
+        c.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, user_id))
+        conn.commit()
+        bot.send_message(user_id, f"🎉 {amount} ብር ገቢ ተደርጓል።")
+        bot.send_message(ADMIN_ID, "✅ ተፈፅሟል።")
+    except:
+        bot.send_message(ADMIN_ID, "❌ እባክዎ ቁጥር ብቻ ያስገቡ!")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
 def buy_movie(call):
@@ -152,7 +147,7 @@ def buy_movie(call):
     if balance >= movie[1]:
         c.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (movie[1], user_id))
         conn.commit()
-        bot.send_video(user_id, movie[0], caption=f"🎬 {movie_name}")
+        bot.send_document(user_id, movie[0], caption=f"🎬 ፋይል: {movie_name}")
     else:
         bot.send_message(user_id, "⚠️ በቂ ሂሳብ የለዎትም።")
 

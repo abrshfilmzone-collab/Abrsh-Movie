@@ -3,7 +3,7 @@ from telebot import types
 import sqlite3
 
 # --- 1. CONFIGURATION ---
-TOKEN = "8673546825:AAEB1yHAx-qV03BvdmSF1yKNNct9_iv72x8"
+TOKEN = "8673546825:AAHMHdVQ-AKH-dQRVBLQnpvZruU5tovQDP8"
 ADMIN_ID = 7908276494 
 PHOTO_URL = "https://i.ibb.co/PsQG4KDY/IMG-20260329-190151-356.jpg"
 bot = telebot.TeleBot(TOKEN)

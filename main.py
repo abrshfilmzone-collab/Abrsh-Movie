@@ -31,7 +31,6 @@ def init_db():
 conn = init_db()
 user_states = {}
 
-# --- 4. KEYBOARDS (ለተጠቃሚ 6 በተኖች ብቻ) ---
 def main_markup():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row("※ ፊልም ልይ!", "※ ያለኝ ሂሳብ!")
@@ -39,15 +38,12 @@ def main_markup():
     markup.row("※ አጠቃቀም!", "※ DM ABRSH!")
     return markup
 
-# --- 5. START & ADMIN INLINE BUTTONS ---
+# --- 4. START HANDLER ---
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
-    
-    # Register user (5 ETB gift silently)
     c = conn.cursor()
-    user_exists = c.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,)).fetchone()
-    if not user_exists:
+    if not c.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,)).fetchone():
         c.execute("INSERT INTO users (user_id, balance) VALUES (?, ?)", (user_id, 5.0))
         conn.commit()
 
@@ -58,55 +54,77 @@ def start(message):
     )
     photo = "https://i.ibb.co/8Dt8G2Ps/5930522196038061317-120.jpg"
     
-    # ለአድሚን ብቻ የሚመጡ Inline Buttons
-    admin_kb = None
+    bot.send_photo(message.chat.id, photo, caption=welcome_text, reply_markup=main_markup())
+    
     if user_id == ADMIN_ID:
-        admin_kb = types.InlineKeyboardMarkup()
-        admin_kb.add(types.InlineKeyboardButton("📊 Bot Statics", callback_data="admin_stats"))
-        admin_kb.add(types.InlineKeyboardButton("📂 Upload Movies", callback_data="admin_upload"))
-        admin_kb.add(types.InlineKeyboardButton("⚙️ Manage Movies", callback_data="admin_manage"))
+        admin_kb = types.InlineKeyboardMarkup(row_width=1)
+        admin_kb.add(
+            types.InlineKeyboardButton("📊 Bot Statics", callback_data="admin_stats"),
+            types.InlineKeyboardButton("📂 Upload Movies", callback_data="admin_upload"),
+            types.InlineKeyboardButton("⚙️ Manage Movies", callback_data="admin_manage")
+        )
+        bot.send_message(message.chat.id, "🛠 **Admin Control Panel:**", reply_markup=admin_kb)
 
-    try:
-        bot.send_photo(message.chat.id, photo, caption=welcome_text, reply_markup=main_markup())
-        if admin_kb:
-            bot.send_message(message.chat.id, "🛠 **Admin Control Panel:**", reply_markup=admin_kb)
-    except:
-        bot.send_message(message.chat.id, welcome_text, reply_markup=main_markup())
+# --- 5. ADMIN: UPLOAD & MANAGE ---
+@bot.callback_query_handler(func=lambda c: c.data == "admin_upload")
+def start_upload(call):
+    msg = bot.send_message(ADMIN_ID, "📂 **ቪዲዮውን ይላኩ (Caption ላይ ስሙን ይጻፉ)...**")
+    bot.register_next_step_handler(msg, process_video_upload)
 
-# --- 6. ፊልም ልይ (SEARCH LOGIC) ---
+def process_video_upload(message):
+    if not message.video and not message.document:
+        bot.send_message(ADMIN_ID, "❌ እባክዎ ቪዲዮ ወይም ፋይል ይላኩ!")
+        return
+    file_id = message.video.file_id if message.video else message.document.file_id
+    movie_name = message.caption if message.caption else "ያልተሰየመ ፊልም"
+    user_states[ADMIN_ID] = {'f_id': file_id, 'name': movie_name}
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    colors = [("⚫️", 0.5), ("🟢", 0.5), ("🟡", 0.3), ("🔴", 1.0), ("🔵", 0.5), ("🟣", 0.5), ("🟠", 0.3), ("⚪️", 5.0)]
+    for icon, price in colors:
+        markup.insert(types.InlineKeyboardButton(f"{icon} {price} ብር", callback_data=f"save_{icon}_{price}"))
+    bot.send_message(ADMIN_ID, f"🎬 **ፊልም፦ {movie_name}**\nአይነቱን ይምረጡ፦", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("save_"))
+def save_movie(call):
+    _, icon, price = call.data.split("_")
+    data = user_states.get(ADMIN_ID)
+    if data:
+        conn.execute("INSERT INTO movies (name, file_id, price, category) VALUES (?, ?, ?, ?)", (data['name'], data['f_id'], float(price), icon))
+        conn.commit()
+        bot.edit_message_text(f"✅ **{data['name']}** በትክክል ተጭኗል!", call.message.chat.id, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "admin_manage")
+def manage_movies(call):
+    movies = conn.execute("SELECT id, name FROM movies ORDER BY id DESC LIMIT 20").fetchall()
+    markup = types.InlineKeyboardMarkup()
+    for m_id, m_name in movies:
+        markup.add(types.InlineKeyboardButton(f"❌ {m_name}", callback_data=f"del_{m_id}"))
+    bot.send_message(ADMIN_ID, "⚙️ **ለማጥፋት የሚፈልጉትን ፊልም ይጫኑ፦**", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda c: c.data.startswith("del_"))
+def delete_movie(call):
+    m_id = call.data.split("_")[1]
+    conn.execute("DELETE FROM movies WHERE id = ?", (m_id,))
+    conn.commit()
+    bot.edit_message_text("✅ ፊልሙ ተሰርዟል!", call.message.chat.id, call.message.message_id)
+
+# --- 6. USER: SEARCH & USAGE ---
 @bot.message_handler(func=lambda m: m.text == "※ ፊልም ልይ!")
 def search_init(message):
     msg = bot.send_message(message.chat.id, "⨳ **የሚፈልጉትን ፊልም ስም ይፃፉ!**")
     bot.register_next_step_handler(msg, process_search)
 
-def process_search(message, page=1):
-    query = message.text if hasattr(message, 'text') else user_states.get(message.chat.id, {}).get('q')
-    if not query: return
-    user_states[message.chat.id] = {'q': query, 'p': page}
-    
-    c = conn.cursor()
-    c.execute("SELECT id, name, category, price FROM movies WHERE name LIKE ?", (f'%{query}%',))
-    res = c.fetchall()
-    
+def process_search(message):
+    query = message.text
+    res = conn.execute("SELECT id, name, category, price FROM movies WHERE name LIKE ?", (f'%{query}%',)).fetchall()
     if not res:
         bot.send_message(message.chat.id, "⨳ **በዚ ስም የተሰየመ ፊልም ማግኘት አልቻልኩም!**\n⨳ **ፊደል ተሳስተው እንዳይሆን ያረጋግጡ!**")
         return
-
-    total_p = math.ceil(len(res) / 10)
-    items = res[(page-1)*10 : page*10]
     markup = types.InlineKeyboardMarkup(row_width=1)
-    for r in items:
-        markup.add(types.InlineKeyboardButton(f"{r[2]} {r[1]} - {r[3]} ብር", callback_data=f"buy_{r[0]}"))
-    
-    nav = []
-    if page > 1: nav.append(types.InlineKeyboardButton("⬅️ Back", callback_data=f"p_{page-1}"))
-    if page < total_p: nav.append(types.InlineKeyboardButton("Next ➡️", callback_data=f"p_{page+1}"))
-    if nav: markup.row(*nav)
-    markup.row(types.InlineKeyboardButton("🔍 New Search", callback_data="n_s"), types.InlineKeyboardButton("🏠 Home", callback_data="h_m"))
-    
-    bot.send_message(message.chat.id, f"🔍 **ውጤቶች ለ '{query}' (ገጽ {page}/{total_p})**", reply_markup=markup)
+    for r in res[:10]: markup.add(types.InlineKeyboardButton(f"{r[2]} {r[1]} - {r[3]} ብር", callback_data=f"buy_{r[0]}"))
+    bot.send_message(message.chat.id, f"🔍 **ውጤቶች ለ '{query}'**", reply_markup=markup)
 
-# --- 7. አጠቃቀም (DETAILED) ---
 @bot.message_handler(func=lambda m: m.text == "※ አጠቃቀም!")
 def usage_instruction(message):
     usage_text = (
@@ -134,43 +152,29 @@ def usage_instruction(message):
     )
     bot.send_message(message.chat.id, usage_text)
 
-# --- 8. CALLBACK HANDLER (ADMIN & USER) ---
-@bot.callback_query_handler(func=lambda c: True)
-def handle_all_callbacks(call):
-    # User Search Pagination
-    if call.data.startswith("p_"):
-        process_search(call.message, int(call.data.split("_")[1]))
-    elif call.data == "n_s":
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        search_init(call.message)
-    elif call.data == "h_m":
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        bot.send_message(call.message.chat.id, "⨳ **እባኮ በተኖቹን በመጠቀም ይዘዙኝ!**")
-
-    # Admin Tools
-    elif call.data == "admin_stats":
-        c = conn.cursor()
-        u_count = c.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        m_count = c.execute("SELECT COUNT(*) FROM movies").fetchone()[0]
-        bot.answer_callback_query(call.id, f"Users: {u_count} | Movies: {m_count}", show_alert=True)
-    
-    elif call.data == "admin_upload":
-        msg = bot.send_message(ADMIN_ID, "📂 **ቪዲዮውን ይላኩ (Caption ላይ ስሙን ይጻፉ)...**")
-        bot.register_next_step_handler(msg, handle_upload_process)
-
-# --- 9. OTHER BUTTONS (DM, BALANCE, REF) ---
+# --- 7. OTHER BTNS ---
 @bot.message_handler(func=lambda m: True)
-def text_handler(m):
+def other_btns(m):
     if m.text == "※ ያለኝ ሂሳብ!":
         res = conn.execute("SELECT balance FROM users WHERE user_id=?", (m.from_user.id,)).fetchone()
         bot.send_message(m.chat.id, f"**⨳ ቀሪ ሂሳብ ~> {res[0] if res else 0.0} ብር**")
     elif m.text == "※ DM ABRSH!":
         bot.send_message(m.chat.id, "**የዚህ ቦት Owner👉 @ABRSHFILMBET**")
+    elif m.text == "※ ገቢ ላድርግ!":
+        kb = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("Telebirr", callback_data="t_b"))
+        bot.send_message(m.chat.id, "⨳ **ገቢ የሚያደርጉበት መንገድ ቴሌብር ነው!**", reply_markup=kb)
     elif m.text == "※ ጎደኛዬን ልጋብዝ!":
         link = f"https://t.me/ABRSHMovies_Bot?start=ref{m.from_user.id}"
-        bot.send_message(m.chat.id, f"**ጓደኞችዎን ይጋብዙ!**\n\n1 ሰው ሲጋብዙ > 0.7 ብር ያገኛሉ!\n\nሊንክዎ፦ {link}")
+        bot.send_message(m.chat.id, f"**ጓደኞችዎን ይጋብዙ!**\n\n1 ሰው ሲጋብዙ > 0.7 ብር ያገኛሉ!\n\n{link}")
 
-# (ቀሪው የገቢ ላድርግ እና የፊልም መጫኛ ኮድ እንደቀድሞው በትክክል ተካቷል)
+@bot.callback_query_handler(func=lambda c: True)
+def global_calls(c):
+    if c.data == "admin_stats":
+        u = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        m = conn.execute("SELECT COUNT(*) FROM movies").fetchone()[0]
+        bot.answer_callback_query(c.id, f"Users: {u} | Movies: {m}", show_alert=True)
+    elif c.data == "t_b":
+        bot.send_message(c.message.chat.id, "⨳ **በዚህ +251961343796 ስልክ ቁጥር በቴሌብር ከ5 ብር ጀምሮ በማስገባት Screen Shoot ላኩ።**")
 
 if __name__ == "__main__":
     Thread(target=run_flask).start()
